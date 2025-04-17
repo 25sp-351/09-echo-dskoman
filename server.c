@@ -1,11 +1,42 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
+#include <unistd.h>
 
 #include <sys/socket.h>
-#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #define DEFAULT_PORT 80
+#define MAX_CONNECTIONS 5
+#define BUFFER_SIZE 128
+
+void handleConnection(int *sock_fd_ptr)
+{
+    printf("handling connection on %ls\n", sock_fd_ptr);
+    while (1)
+    {
+        char buffer[BUFFER_SIZE];
+        memset(buffer, 0, sizeof(buffer));
+
+        // read from the socket
+        int bytes_read = read(*sock_fd_ptr, buffer, sizeof(buffer) - 1);
+        if (bytes_read <= 0)
+        {
+            printf("client disconnected\n");
+            break;
+        }
+
+        // print the request
+        printf("request: %s", buffer);
+
+        // send a response
+        char *response = buffer;
+
+        write(*sock_fd_ptr, response, strlen(response));
+    }
+    printf("done handling connection from %ls\n", sock_fd_ptr);
+}
 
 int main(int argc, char *argv[])
 {
@@ -43,7 +74,7 @@ int main(int argc, char *argv[])
     // end reading arguments
 
     // create a socket
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
 
     struct sockaddr_in socket_address;
     memset(&socket_address, 0, sizeof(socket_address));
@@ -55,10 +86,41 @@ int main(int argc, char *argv[])
 
     int return_val;
 
-    return_val = bind(sockfd, (struct sockaddr *)&socket_address, sizeof(socket_address));
+    // bind the socket to the address
+    return_val = bind(sock_fd, (struct sockaddr *)&socket_address, sizeof(socket_address));
     if (return_val < 0)
     {
         perror("bind");
         exit(EXIT_FAILURE);
     }
+
+    // you should be watching...
+    return_val = listen(sock_fd, MAX_CONNECTIONS);
+    if (return_val < 0)
+    {
+        perror("listen");
+        exit(EXIT_FAILURE);
+    }
+    printf("listening for connections...\n");
+
+    // accept a connection
+    struct sockaddr_in client_address;
+    socklen_t client_address_len = sizeof(client_address);
+
+    // start the event loop
+    while (1)
+    {
+        pthread_t thread;
+        int *client_fd_buffer = malloc(sizeof(int));
+
+        *client_fd_buffer = accept(sock_fd, (struct sockaddr *)&client_address, &client_address_len);
+
+        printf("accepted connection from %s:%d\n",
+               inet_ntoa(client_address.sin_addr),
+               ntohs(client_address.sin_port));
+
+        pthread_create(&thread, NULL, (void *)handleConnection, (void *)client_fd_buffer);
+    }
+
+    return 0;
 }
